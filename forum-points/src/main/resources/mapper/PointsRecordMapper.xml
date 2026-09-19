@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.points.mapper.PointsRecordMapper">
+
+    <!--
+      积分流水（游标分页，倒序）。
+
+      【为什么这条用 XML 而不是 @Select 注解】
+      它有可选的 cursor 条件，需要用 <if> 拼。注解里写动态 SQL 得把整段 SQL
+      塞进 <script> 字符串，引号与转义会迅速变得不可读——本项目的一贯做法是
+      「单表条件更新用注解、带动态条件的查询用 XML」。
+
+      【SELECT * 在这里可以接受】
+      实体与表的列一一对应，且只有 9 列。写成 * 的前提是本表列不会随意增加；
+      流水表是不可变的（只 INSERT），列结构稳定，因此不显式列举的收益大于风险。
+
+      【ORDER BY id DESC 而不是 create_time DESC】
+      create_time 精度到秒，同一秒内的多笔流水（签到 + 全勤奖励可能同时发生）
+      用它排序结果不确定，翻页会重复或漏行。id 是自增主键，既唯一又天然按时序排列，
+      还能直接走 idx_user_id (user_id, id DESC) 的第二列做有序扫描。
+    -->
+    <select id="selectByCursor" resultType="com.school.forum.points.entity.PointsRecord">
+        SELECT *
+        FROM t_points_record
+        WHERE user_id = #{userId}
+        <if test="cursor != null">
+            AND id &lt; #{cursor}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

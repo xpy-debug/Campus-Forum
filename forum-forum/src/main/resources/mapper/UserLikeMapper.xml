@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.forum.mapper.UserLikeMapper">
+
+    <!--
+      INSERT IGNORE 而非 INSERT：消费端 at-least-once，重复消费时唯一索引
+      uk_user_target 会拦住重复行，用 IGNORE 让数据库静默跳过，
+      比抛 SQLIntegrityConstraintViolationException 再捕获高效得多。
+    -->
+    <insert id="batchInsertIgnore">
+        INSERT IGNORE INTO t_user_like (user_id, target_type, target_id, target_owner_id, create_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.targetType}, #{item.targetId},
+            #{item.targetOwnerId}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <!-- 行值构造器：(a,b,c) IN ((?,?,?),(?,?,?)) 一次删一批，避免逐条 DELETE 的往返 -->
+    <delete id="batchDelete">
+        DELETE FROM t_user_like
+        WHERE (user_id, target_type, target_id) IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            (#{item.userId}, #{item.targetType}, #{item.targetId})
+        </foreach>
+    </delete>
+
+    <!-- Redis 计数键缺失时用它播种（冷启动自愈） -->
+    <select id="countByTarget" resultType="int">
+        SELECT COUNT(*)
+        FROM t_user_like
+        WHERE target_type = #{targetType}
+          AND target_id = #{targetId}
+    </select>
+
+</mapper>

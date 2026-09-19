@@ -1,0 +1,62 @@
+# ===================== Java / Maven =====================
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+.mvn/timing.properties
+
+# ===================== 前端 / Node =====================
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+*.local
+
+# ===================== 日志 =====================
+*.log
+logs/
+$log
+
+# ===================== 本地运行时产物 / 冒烟测试输出 =====================
+login.json
+.smoke_user
+smoke/shots/
+smoke/__pycache__/
+smoke/*.json
+smoke/*.txt
+
+# ===================== Python =====================
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# ===================== IDE / 编辑器 =====================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.swp
+
+# ===================== 操作系统 =====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===================== 本地工具 / Agent 配置 =====================
+.claude/
+.commandcode/
+
+# ===================== 环境变量 / 密钥 =====================
+.env
+.env.local
+.env.*.local

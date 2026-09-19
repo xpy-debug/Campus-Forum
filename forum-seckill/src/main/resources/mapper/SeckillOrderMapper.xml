@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.seckill.mapper.SeckillOrderMapper">
+
+    <!--
+      我的秒杀订单（游标分页，倒序）。
+
+      游标用 id 而不是 create_time：同一秒内可能有多笔订单（秒杀开场那一瞬尤为密集），
+      按秒级时间戳分页会重复或漏行。id 唯一且单调，既是排序键也是游标本身。
+
+      不过滤状态：待支付、已取消、超时关闭的订单都要能看到——
+      用户需要知道「我抢到过，但没付款」与「我根本没抢到」是两回事。
+    -->
+    <select id="selectByCursor" resultType="com.school.forum.seckill.entity.SeckillOrder">
+        SELECT *
+        FROM t_seckill_order
+        WHERE user_id = #{userId}
+        <if test="cursor != null">
+            AND id &lt; #{cursor}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

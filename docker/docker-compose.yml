@@ -1,0 +1,259 @@
+﻿# =====================================================================================
+# 校园论坛 —— 本地开发依赖组件编排
+# =====================================================================================
+# 启动：  docker compose -f docker/docker-compose.yml up -d
+# 停止：  docker compose -f docker/docker-compose.yml down
+# 清库：  docker compose -f docker/docker-compose.yml down -v   (会删除所有数据)
+# 查看：  docker compose -f docker/docker-compose.yml ps
+#
+# 组件与端口：
+#   MySQL       localhost:3306    root / forum123456     库名 school_forum
+#   Redis       localhost:6379    无密码
+#   RabbitMQ    localhost:5672    管理台 http://localhost:15672  guest/guest
+#   Kafka       localhost:9092    KRaft 模式（无 ZooKeeper）
+#   Kafka UI    http://localhost:8090
+#   Redis UI    http://localhost:8081
+#
+# 【重要】MySQL 首次启动时会自动执行 sql/ 下的建表与初始化脚本，
+#        因此必须保证首次 up 之前 sql/01-schema.sql 已存在。
+# =====================================================================================
+
+name: school-forum
+
+services:
+
+  # -----------------------------------------------------------------------------------
+  # MySQL 8.4 —— 主存储
+  # 首次启动自动执行 docker-entrypoint-initdb.d 下按文件名排序的 .sql 脚本
+  # -----------------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.4
+    container_name: forum-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: forum123456
+      MYSQL_DATABASE: school_forum
+      TZ: Asia/Shanghai
+      # 【必须保留】决定容器内所有 mysql 客户端的默认字符集。
+      #
+      # mysql 客户端不显式指定字符集时，会按进程 locale 推导（nl_langinfo）。
+      # 容器不设 LANG 时 locale 为 C，推导结果是 ASCII，客户端于是静默退化成 latin1。
+      # 这一个默认值同时踩坏两件事：
+      #   1) 首次初始化导入 —— docker-entrypoint.sh 用的正是这个客户端，
+      #      UTF-8 的 01/02 脚本被按 latin1 解释，表注释与种子数据全部双重编码写坏
+      #      （"论坛板块表" E8AEBA... 被存成 C3A8C2AE...），全程不报任何错；
+      #   2) 日常查询 —— 结果集转不成 latin1，中文一律显示成 ??????，
+      #      中文全文检索的查询串也会被转成 ? 而搜不到东西。
+      # 设成 C.UTF-8 后客户端默认即 utf8mb4，上面两条一起消失，
+      # 无需再给每条 `docker exec ... mysql` 手加 --default-character-set=utf8mb4。
+      #
+      # 不要改用挂载 /etc/mysql/conf.d/*.cnf 写 [client] default-character-set 的做法：
+      # Windows 绑挂载进来的文件权限是 0777，MySQL 会判定为 world-writable 并
+      # 打印 "World-writable config file ... is ignored" 后直接忽略，看起来配了其实没生效。
+      LANG: C.UTF-8
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # 中文全文检索依赖 ngram 分词器，默认 2 即按二字词切分
+      - --ngram_token_size=2
+      # 大小写不敏感的表名（Linux 容器默认敏感，与 Windows 开发环境保持一致）
+      - --lower_case_table_names=1
+      - --default-time-zone=+08:00
+    volumes:
+      - forum-mysql-data:/var/lib/mysql
+      # 只读挂载：容器启动时按 01 → 02 的顺序执行
+      - ../sql/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../sql/02-init-data.sql:/docker-entrypoint-initdb.d/02-init-data.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pforum123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - forum-net
+
+  # -----------------------------------------------------------------------------------
+  # Redis 7 —— 缓存 / 计数 / 库存 / 分布式锁
+  # 开启 AOF：点赞计数与秒杀库存属于"实时真相"，宕机丢失代价高
+  # -----------------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: forum-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      # 本项目不使用 Redis 作为持久主存储，内存压力大时优先淘汰
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - forum-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - forum-net
+
+  # -----------------------------------------------------------------------------------
+  # RabbitMQ 3.13 —— 可靠投递 / 延迟消息
+  #
+  # 【关于延迟消息】本编排未安装 rabbitmq_delayed_message_exchange 插件，
+  #   订单超时取消使用 RabbitMQ 内置的 TTL + 死信队列（DLX）实现，无需插件：
+  #     订单创建 → 发送到 order.delay.queue（队列 TTL = 支付超时时间，且不设消费者）
+  #     → 消息到期变成死信 → 路由到 order.dlx → 进入 order.cancel.queue → 被消费
+  #   注意：同一队列内所有消息的 TTL 必须一致（本项目按活动配置统一 TTL，满足此前提），
+  #        否则先入队的长 TTL 消息会阻塞后续短 TTL 消息的过期——这是 TTL+DLX 方案最著名的坑。
+  #
+  #   如需改用延迟插件，参见 docker/README.md 中的说明。
+  # -----------------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: forum-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # 管理台
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - forum-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    networks:
+      - forum-net
+
+  # -----------------------------------------------------------------------------------
+  # Kafka 3.7 —— 高吞吐事件流
+  # KRaft 模式（3.0+ 无需 ZooKeeper，少一个组件少一份运维）
+  #
+  # 【advertised.listeners 说明】应用跑在宿主机而非容器内，因此对外通告必须写成
+  #   localhost:9092。若写成 kafka:9092，宿主机上的应用会连接失败。
+  #
+  # 【为什么用本地镜像 tag 而不是 apache/kafka:3.7.0】
+  #   docker pull apache/kafka:3.7.0 在国内镜像源上稳定失败——失败的偏偏不是 200MB
+  #   的层，而是 7.5KB 的 config blob，属于 docker 客户端读取 blob 的实现与该 CDN
+  #   不兼容，换源无效（所有镜像源最终都 302 到同一个后端）。
+  #   所以改由 build-kafka-image.sh 用 curl 把各 blob 下全、按 docker-archive 格式
+  #   组装后 docker load 进来，tag 为 forum/kafka:3.7.0。
+  #
+  #   ⚠ 换机器或清空镜像后需要先跑一次：bash build-kafka-image.sh
+  #   内容与官方 apache/kafka:3.7.0 二进制一致（每个层的 sha256 都已校验）。
+  # -----------------------------------------------------------------------------------
+  kafka:
+    image: forum/kafka:3.7.0
+    container_name: forum-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # 单节点开发环境，所有副本因子必须为 1，否则主题创建会失败
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # 自动创建主题（开发便利）。生产环境应关闭并显式建主题
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # 与设计文档一致：点赞事件按 3 分区做基准压测对比
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - forum-kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - forum-net
+
+  # -----------------------------------------------------------------------------------
+  # Kafka UI —— 可视化观察主题、分区、消费组积压
+  # 压测对比实验时用来直观确认两个 MQ 的积压情况，非必需组件
+  #
+  # 【为什么放在 ui profile 里】这两个 UI 镜像在本机拉不下来（与 kafka 镜像同一个
+  #   httpReadSeeker 问题）。如果不加 profile，docker compose up -d 会因为拉不到它们
+  #   而整体报错——核心组件明明能起来，却被迫一起失败。加上 profile 之后：
+  #     docker compose up -d                     只起核心组件，开箱即用
+  #     docker compose --profile ui up -d        连同 UI 一起起（需要先备好镜像）
+  #
+  #   需要 UI 时先用脚本构建镜像（构建脚本支持任意镜像，见文件头说明）：
+  #     IMG=provectuslabs/kafka-ui TAG=latest TARGET=forum/kafka-ui:latest \
+  #     WORK=/c/work/school/docker/kafka-ui-image bash build-kafka-image.sh
+  #   然后把下面的 image 换成 forum/kafka-ui:latest。
+  #
+  #   注：MQ 对比实验的主要数据来源是 t_mq_consume_log 表（记录了 provider、
+  #   耗时、重试次数），比肉眼看 UI 更可靠。UI 只是辅助。
+  # -----------------------------------------------------------------------------------
+  kafka-ui:
+    image: docker.m.daocloud.io/provectuslabs/kafka-ui:latest
+    container_name: forum-kafka-ui
+    profiles: ["ui"]
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - forum-net
+
+  # -----------------------------------------------------------------------------------
+  # Redis Commander —— Redis 可视化
+  # 调试点赞 Set、秒杀库存等关键 Key 时很有用
+  # 与 kafka-ui 同理放在 ui profile 里，默认不启动
+  # -----------------------------------------------------------------------------------
+  redis-ui:
+    image: docker.m.daocloud.io/rediscommander/redis-commander:latest
+    container_name: forum-redis-ui
+    profiles: ["ui"]
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - forum-net
+
+volumes:
+  forum-mysql-data:
+  forum-redis-data:
+  forum-rabbitmq-data:
+  forum-kafka-data:
+
+networks:
+  forum-net:
+    driver: bridge

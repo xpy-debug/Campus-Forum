@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-boot</artifactId>
+    <name>forum-boot</name>
+    <description>启动模块：唯一的可执行模块，负责组装所有业务模块</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-admin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-user</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-forum</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-seckill</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-points</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
+        <!-- 架构约束测试。放在唯一能「看到全部模块」的 boot 模块里，
+             因为它需要把全部模块的类都加载进来才能校验跨模块依赖 -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>school-forum</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.school.forum.ForumApplication</mainClass>
+                    <excludes>
+                        <!-- Lombok 只在编译期需要，打进去只会增大包体 -->
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

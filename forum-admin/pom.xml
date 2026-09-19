@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-admin</artifactId>
+    <name>forum-admin</name>
+    <description>后台管理：内容审核、用户管理、活动管理与选型压测结果查询</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-infrastructure</artifactId>
+        </dependency>
+
+        <!--
+          后台是各业务域的「消费者」，因此依赖它们的 api 包。
+          注意架构约束：只允许调用各模块 api 包下的接口，
+          不得直接引用它们的 service、mapper、entity。
+          这条规则由 forum-boot 里的 ArchUnit 测试强制校验——
+          如果放任 admin 直接查别人的表，那这些模块的边界就形同虚设，
+          将来拆微服务时会发现到处都是跨模块的 SQL 依赖。
+        -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-user</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-forum</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-seckill</artifactId>
+        </dependency>
+        <!-- 积分商城的管理能力（商品增删改、发货、结算奖励）在 forum-points 的 api 包里 -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-points</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

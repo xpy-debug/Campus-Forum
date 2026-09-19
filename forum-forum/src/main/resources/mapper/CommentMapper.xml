@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.forum.mapper.CommentMapper">
+
+    <sql id="columns">
+        id, post_id, user_id, root_id, parent_id, reply_user_id, level, content,
+        floor, like_count, reply_count, is_author, status, create_time
+    </sql>
+
+    <!--
+      一级评论按楼层升序翻页。floor 是递增的，本身就是全序，游标只需要它一个值——
+      索引 idx_post_l1 的末尾因此不必像 t_post 那样追加 id DESC。
+      这里用 level = 1 而不是 root_id = 0 做条件：level 是索引的第三个列，
+      等值条件能直接被索引吃掉，与 post_id、status 一起构成完整的前缀。
+    -->
+    <select id="selectRootPage" resultType="com.school.forum.forum.entity.Comment">
+        SELECT
+        <include refid="columns"/>
+        FROM t_comment
+        WHERE post_id = #{postId}
+        AND level = 1
+        AND status = 1
+        <if test="cursorFloor != null">
+            AND floor &gt; #{cursorFloor}
+        </if>
+        ORDER BY floor
+        LIMIT #{size}
+    </select>
+
+    <!--
+      窗口函数取每组前 N 条回复。等价写法是「对每条一级评论查一次」，
+      20 条一级评论就是 21 次查询（N+1），在回复多的帖子上会直接拖垮详情页。
+      子查询里必须带 id 作为次序的决胜列，否则同一秒发的两条回复顺序不稳定。
+    -->
+    <select id="selectTopReplies" resultType="com.school.forum.forum.entity.Comment">
+        SELECT id, post_id, user_id, root_id, parent_id, reply_user_id, level, content,
+        floor, like_count, reply_count, is_author, status, create_time
+        FROM (
+        SELECT
+        <include refid="columns"/>,
+        ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY create_time, id) AS rn
+        FROM t_comment
+        WHERE root_id IN
+        <foreach collection="rootIds" item="rootId" open="(" separator="," close=")">
+            #{rootId}
+        </foreach>
+        AND status = 1
+        ) t
+        WHERE t.rn &lt;= #{limit}
+        ORDER BY t.root_id, t.rn
+    </select>
+
+    <!--
+      MAX(floor) 可以只走索引：idx_post_l1 是 (post_id, status, level, floor)，
+      floor 恰好是最后一列。这里不过滤 status 也是刻意的——已删除评论的楼层
+      同样不能被复用，否则删掉 5 楼之后新评论会再占一次 5 楼。
+    -->
+    <select id="selectMaxFloor" resultType="java.lang.Integer">
+        SELECT MAX(floor)
+        FROM t_comment
+        WHERE post_id = #{postId}
+        AND level = 1
+    </select>
+
+    <update id="addReplyCount">
+        UPDATE t_comment
+        SET reply_count = GREATEST(0, CAST(reply_count AS SIGNED) + #{delta})
+        WHERE id = #{rootId}
+    </update>
+
+    <!--
+      软删除而非物理删除：物理删除会让「张三回复了李四，但李四的评论没了」
+      成为一段无法理解的对话。留一行占位，前端渲染「该评论已删除」。
+    -->
+    <update id="softDelete">
+        UPDATE t_comment
+        SET status = 3
+        WHERE id = #{id}
+    </update>
+
+    <!-- 同 PostMapper.batchAddLikeCount，CAST 的理由见那里的说明 -->
+    <update id="batchAddLikeCount">
+        UPDATE t_comment
+        SET like_count = GREATEST(0, CAST(like_count AS SIGNED) + CASE id
+        <foreach collection="deltas" item="d">
+            WHEN #{d.targetId} THEN #{d.delta}
+        </foreach>
+        ELSE 0 END)
+        WHERE id IN
+        <foreach collection="deltas" item="d" open="(" separator="," close=")">
+            #{d.targetId}
+        </foreach>
+    </update>
+
+</mapper>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-common</artifactId>
+    <name>forum-common</name>
+    <description>通用基础模块：统一响应、错误码、业务异常、常量。不依赖任何业务模块</description>
+
+    <dependencies>
+        <!--
+          本模块刻意不引入任何 Spring 框架依赖（连 spring-web 都不要）：
+          Result / ErrorCode / BizException / RedisKey 都是可以在纯 JVM 环境下
+          单测的 POJO。全局异常处理器放在 forum-infrastructure，因为它需要 Web 栈。
+          保持这一层「零框架依赖」能让单元测试跑得极快，也避免了循环依赖。
+        -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

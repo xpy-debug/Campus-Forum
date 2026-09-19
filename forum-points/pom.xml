@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-points</artifactId>
+    <name>forum-points</name>
+    <description>积分与商城域：每日签到、月度全勤奖励、积分账户与流水、积分商城兑换</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-infrastructure</artifactId>
+        </dependency>
+
+        <!-- 依赖方向 POINTS → USER，与 FORUM → USER 同理：
+             积分页要显示昵称、商城订单要按用户维度查询，
+             这些都应通过 UserApi 拿到，而不是让积分域去 JOIN t_user。
+
+             注意这里没有引入任何 MQ 客户端依赖：积分与商城是**全同步**链路，
+             不需要削峰，因此不发消息。这不是遗漏——
+             签到与兑换都必须立刻落库（用户下一秒就要看到余额），
+             把它们做成异步反而会引入「积分扣了但订单还没建」这类无法接受的中间态。 -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-user</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

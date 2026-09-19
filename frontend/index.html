@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>校园论坛</title>
+    <script>
+      // 首帧之前定好主题，否则深色用户会先看到一帧白屏。
+      // 这段必须内联在 head 里而不能放进 main.js：打包产物是异步加载的，
+      // 等它执行时首帧早就画完了。取值逻辑与 src/composables/useTheme.js 保持一致
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('forum_theme')
+          var dark =
+            saved === 'dark' ||
+            (saved !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (e) {
+          /* 隐私模式下 localStorage 不可用，跟随默认浅色即可 */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

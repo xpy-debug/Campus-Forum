@@ -1,0 +1,200 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+    encoding:
+      charset: UTF-8
+      force: true
+  # 优雅停机：收到 SIGTERM 后先停止接收新请求，等在途请求处理完再退出。
+  # 不做这个配置的话，发布时正在处理的请求会被直接掐断，
+  # 表现为「每次发版都有少量用户报错」，且很难复现。
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+    # 与 Tomcat 默认一致，显式写出来是为了在压测时能一眼看到它是不是瓶颈
+    accept-count: 100
+
+spring:
+  application:
+    name: school-forum
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  profiles:
+    # 默认使用 RabbitMQ。切换方式见 application-mq-kafka.yml 的说明。
+    active: mq-rabbit
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # characterEncoding 要填 Java 的字符集名，不是 MySQL 的字符集名。
+    # 写 utf8mb4 会直接启动失败：java.io.UnsupportedEncodingException: utf8mb4。
+    # UTF-8 在这里等价于 MySQL 侧的 utf8mb4（Connector/J 8 起默认就用 utf8mb4 通信），
+    # 真正的排序规则由 connectionCollation 指定，而不是靠 characterEncoding。
+    url: jdbc:mysql://localhost:3306/school_forum?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_general_ci&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&allowMultiQueries=true
+    username: root
+    password: forum123456
+    hikari:
+      pool-name: forum-hikari
+      # 连接池大小：不是越大越好。MySQL 的连接是线程模型，
+      # 连接数超过 CPU 核数后增加的主要是上下文切换开销。
+      # 20 对于单机开发足够，压测时这个值要作为变量固定并记录。
+      maximum-pool-size: 20
+      minimum-idle: 10
+      # 获取连接的超时时间。设小一点（3 秒）是为了快速失败——
+      # 数据库出问题时让请求尽快返回错误，而不是排队 30 秒后一起超时，
+      # 后者会让线程池被瞬间打满，把故障从「数据库慢」放大成「整个服务不可用」。
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 5
+          # 等待连接的最大时间。-1 表示无限等待——绝不能用这个值，
+          # 它会让请求在连接池耗尽时永久挂起，线程池被逐渐吃光。
+          max-wait: 2000ms
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    default-property-inclusion: non_null
+    deserialization:
+      # 前端多传了字段不应该报错，只忽略即可
+      fail-on-unknown-properties: false
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 开发期打印 SQL。压测时必须关掉——日志输出会成为被测系统的一部分，
+    # 测出来的 QPS 里混进了日志框架的开销。
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      # 逻辑删除字段。本项目未启用：帖子的「删除」用 status 字段表达，
+      # 不同状态的语义不同（用户删除 / 管理员删除 / 审核中），
+      # 一个 deleted 布尔值表达不了，反而会让所有查询都要额外带条件。
+      table-underline: true
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.school.forum.**.entity
+
+forum:
+  jwt:
+    # JWT 签名密钥。HS256 要求密钥不少于 32 字节，JwtProperties 在启动时校验，
+    # 配短了会直接启动失败，而不是留下一个弱密钥在生产环境里悄悄跑着。
+    # 部署时用环境变量覆盖，不要把真实密钥写进仓库。
+    secret: ${FORUM_JWT_SECRET:school-forum-dev-secret-key-change-me-in-production}
+    # 访问令牌 30 分钟：够短，即使泄漏窗口也有限；配合刷新令牌，
+    # 用户不会被频繁踢下线。登出或封禁时靠 Redis 白名单立即失效
+    access-ttl-minutes: 30
+    refresh-ttl-days: 7
+  task:
+    # 浏览数回写周期。浏览量允许滞后，5 分钟一次能把数据库写入量摊薄到可以忽略
+    view-sync-interval-ms: 300000
+  points:
+    # 签到与全勤规则。放在配置里而不是常量里：调整积分策略属于运营动作，
+    # 不该触发一次发版。PointsProperties 在启动时校验这些值的自洽性，
+    # 配错（例如阈值超出一个月）会直接启动失败，而不是安静地算错
+    signin-points: 5
+    # 「当月签到天数超过多少天」才有全勤奖励。25 表示 26 天及以上，
+    # 与 SQL 里的 HAVING COUNT(*) > 25 严格对应
+    bonus-threshold: 25
+    bonus-points: 100
+    # 单批结算的用户数。分批是为了让每日结算任务保持短事务
+    bonus-batch-size: 2000
+    # 签到位图的 TTL（天）。要覆盖「当月统计」与「次月结算上月」两个时间点，
+    # 因此至少 32 天，默认 70 天留出容错余量
+    bitmap-ttl-days: 70
+    # 两个后台任务的调度表达式，默认值与《04-数据库设计》7.3 节的表格一致。
+    # 做成配置是为了能在不改代码的前提下挪动时间窗（避开备份、压测窗口），
+    # 以及让它们在测试环境能够被临时触发——一个只在凌晨 4 点跑的任务
+    # 若不能改时间，就等于永远没有被验证过
+    bonus-cron: "0 10 0 * * ?"    # 每日 00:10 结算上月全勤奖励
+    repair-cron: "0 0 4 * * ?"    # 每日 04:00 按数据库重建签到位图
+  seckill:
+    # 预热与状态刷新的扫描周期。两者扫描对象相同、周期一致，共用一个 cron。
+    # 活动的预热窗口本就按分钟计，比每分钟更密没有意义
+    warmup-cron: "0 * * * * ?"
+    # 库存对账周期。默认 5 分钟，与《04-数据库设计》第 8 节的表格一致。
+    # 注意它只在活动不在时间窗内时真正执行——洪峰期间用落后的 DB 值覆盖 Redis
+    # 会把库存调高，那是超卖而不是修数据
+    reconcile-interval-ms: 300000
+    # 超时订单的兜底扫描周期。延迟消息保证及时性（秒级），它保证可靠性
+    # （消息丢失或 outbox 积压时，最多晚一个周期）
+    timeout-scan-interval-ms: 300000
+    # 单次超时扫描的订单数上限，避免积压时一次性捞空表
+    timeout-scan-batch-size: 500
+    # 抢购结果键的 TTL。前端轮询首次 200ms，60 秒足够拿到结果；
+    # 过期后接口会回查订单表兜底，不会出现「刷新一次就看不到抢购结果」
+    result-ttl-seconds: 60
+    # 结果确定（成功/取消/超时）后的保留时长，供用户回来支付或查看
+    result-settled-ttl-hours: 24
+    # 库存键与活动快照的 TTL，覆盖活动时长 + 结算窗口
+    stock-ttl-hours: 24
+    # 订单号日内序号的 TTL（2 天，覆盖跨天即可）
+    order-no-seq-ttl-seconds: 172800
+    # 单用户 10 秒内的抢购请求上限。限流不是正确性防线（Lua 才是），只是挡住连点
+    grab-rate-limit-per-ten-seconds: 5
+  mq:
+    # 这个值与 spring.profiles.active 必须一致，否则会出现
+    # 「连的是 RabbitMQ 但发消息走 Kafka」的问题。实际生效值以 profile 文件为准，
+    # 这里写出来只是为了让配置项有一个可读的默认值。
+    provider: rabbit
+    retry-backoff-ms: 1000
+    idempotent-ttl-hours: 24
+    alert-on-discard: true
+    metrics:
+      enabled: true
+      flush-interval-ms: 5000
+      buffer-size: 10000
+      record-detail: true
+    outbox:
+      enabled: true
+      scan-interval-ms: 1000
+      batch-size: 200
+      max-retry: 5
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    root: info
+    com.school.forum: debug
+    # 压测时把下面两行改成 warn，避免日志成为瓶颈
+    org.springframework.jdbc: info
+    org.apache.kafka: warn
+    org.springframework.amqp: warn
+  pattern:
+    # %X{traceId} 从 MDC 取值，把一次请求的所有日志串起来
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n"

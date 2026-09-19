@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.points.mapper.MallOrderMapper">
+
+    <!--
+      我的兑换记录（游标分页，倒序）。
+
+      游标用 id 而不是 create_time：同一秒内可能有多笔订单（压测、管理员批量操作），
+      按秒级时间戳分页会重复或漏行。id 唯一且单调，既是排序键也是游标本身。
+
+      不加 status 过滤：用户要看的是完整的兑换历史，包括已取消的那些——
+      一笔被取消的兑换同样是「我做过什么」的一部分。
+    -->
+    <select id="selectByCursor" resultType="com.school.forum.points.entity.MallOrder">
+        SELECT *
+        FROM t_mall_order
+        WHERE user_id = #{userId}
+        <if test="cursor != null">
+            AND id &lt; #{cursor}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

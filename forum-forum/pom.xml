@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-forum</artifactId>
+    <name>forum-forum</name>
+    <description>论坛核心域：板块、帖子、评论、点赞、收藏、标签、搜索</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-infrastructure</artifactId>
+        </dependency>
+
+        <!-- 帖子列表要展示作者昵称与头像。调 UserApi 拿，而不是自己 JOIN t_user：
+             直接查用户表会把「论坛域」和「用户表结构」焊死，
+             将来把用户拆成独立服务时，论坛域这些 SQL 全都要改。
+             依赖方向 FORUM → USER 是单向的，不成环（ArchitectureTest 会校验） -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-user</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

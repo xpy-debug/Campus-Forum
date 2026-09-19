@@ -1,0 +1,48 @@
+# ============================================================================
+# MQ 选型：使用 RabbitMQ
+# ============================================================================
+# 启动方式（默认即是）：java -jar school-forum.jar
+# 或显式指定：java -jar school-forum.jar --spring.profiles.active=mq-rabbit
+#
+# 这个文件与 application-mq-kafka.yml 是一对，切换时改的应该是
+# spring.profiles.active，而不是手工去改 forum.mq.provider。
+# 原因是两个产品需要不同的自动装配排除项，只改 provider 会导致
+# 被禁用的那个产品的自动配置仍然生效（比如 RabbitMQ 的
+# CachingConnectionFactory 仍会被创建），日志里出现令人困惑的连接错误。
+# ============================================================================
+
+forum:
+  mq:
+    provider: rabbit
+    rabbit:
+      # 并发消费者数。这个值与 Kafka 的「分区数」在压测中是对位比较的：
+      # 二者共同决定消费端并行处理的上限。
+      # RabbitMQ 可以做到「消费者数 > 队列数」（多个消费者抢同一个队列），
+      # 而 Kafka 无法让消费线程数超过分区数——这是两者扩容方式的关键差异。
+      concurrent-consumers: 3
+      max-concurrent-consumers: 8
+      # 预取数量。调大能提升吞吐但会加剧不均衡：
+      # 某个消费者一次拿走 50 条慢慢处理，其他消费者闲着，
+      # 且该消费者崩溃时这 50 条会全部重新投递（重复消费量放大）。
+      prefetch-count: 50
+      manual-ack: true
+      # 压测时必须保持 true。改成 false 测的是内存队列的性能，
+      # 与生产环境（持久化落盘）的差距可以达到数倍。
+      durable: true
+
+spring:
+  autoconfigure:
+    # 排除 Kafka 的自动配置。本 profile 下 Kafka 的 Bean 一个都不需要，
+    # 留着它只会在启动时尝试连接 Broker、刷出一堆误导性的错误日志。
+    exclude:
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+
+logging:
+  level:
+    com.school.forum.infrastructure.mq.rabbit: debug

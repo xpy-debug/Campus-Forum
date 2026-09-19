@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.school.forum</groupId>
+        <artifactId>school-forum</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forum-seckill</artifactId>
+    <name>forum-seckill</name>
+    <description>营销域：优惠券、秒杀活动、库存预扣减、订单</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-infrastructure</artifactId>
+        </dependency>
+
+        <!--
+          积分秒杀要用积分支付，因此依赖 forum-points。
+          注意依赖方向：SECKILL → POINTS → USER，无环。
+
+          但只允许调用 forum-points 的 api 包（PointsSpendApi），
+          不得引用它的 entity / mapper / service —— 这与 forum-admin
+          访问其他模块的约定是同一条规则。积分变动的规则（怎么扣、流水怎么记）
+          属于积分域，秒杀域只是它的一个调用方。
+        -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-points</artifactId>
+        </dependency>
+        <!-- 管理端订单列表要显示下单人昵称，走 UserApi 批量取，不 JOIN t_user -->
+        <dependency>
+            <groupId>com.school.forum</groupId>
+            <artifactId>forum-user</artifactId>
+        </dependency>
+        <!-- 注意：这里没有引入任何 MQ 客户端依赖。
+             秒杀下单消息通过 EventPublisher 抽象发送，
+             它是 Kafka 还是 RabbitMQ 由 forum.mq.provider 决定。
+             ArchUnit 测试会强制校验这一点。 -->
+    </dependencies>
+
+</project>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.forum.mapper.PostMapper">
+
+    <!--
+      列表页只取 t_post 自己的列，绝不 JOIN t_post_content。
+      拆表的全部意义就在于让列表分页不搬运正文，JOIN 一次就全还回去了。
+    -->
+    <sql id="listColumns">
+        id, board_id, user_id, title, summary, cover_image, type, status,
+        like_count, comment_count, collect_count, view_count, share_count,
+        hot_score, last_comment_time, publish_time, create_time
+    </sql>
+
+    <!--
+      (publish_time, id) < (?, ?) 是行值比较，不是「publish_time < ? AND id < ?」。
+      后者在时间相同时会把同一秒内 id 更小的帖子全部漏掉，是游标分页最常见的错误写法。
+    -->
+    <select id="selectPageByTime" resultType="com.school.forum.forum.entity.Post">
+        SELECT
+        <include refid="listColumns"/>
+        FROM t_post
+        WHERE status = 1
+        AND type = #{type}
+        <if test="boardId != null">
+            AND board_id = #{boardId}
+        </if>
+        <if test="cursorTime != null">
+            AND (publish_time, id) &lt; (#{cursorTime}, #{cursorId})
+        </if>
+        ORDER BY publish_time DESC, id DESC
+        LIMIT #{size}
+    </select>
+
+    <select id="selectPageByHot" resultType="com.school.forum.forum.entity.Post">
+        SELECT
+        <include refid="listColumns"/>
+        FROM t_post
+        WHERE status = 1
+        AND type = 0
+        <if test="boardId != null">
+            AND board_id = #{boardId}
+        </if>
+        <if test="cursorScore != null">
+            AND (hot_score, id) &lt; (#{cursorScore}, #{cursorId})
+        </if>
+        ORDER BY hot_score DESC, id DESC
+        LIMIT #{size}
+    </select>
+
+    <!--
+      置顶/公告帖单独查询：type != 0 是范围条件，与普通帖合并查询会让优化器放弃
+      idx_board_list 转而 filesort（详见《04-数据库设计》4.2 节）。
+      结果集极小（每板块 < 10 条），这点排序开销可以接受。
+    -->
+    <select id="selectPinned" resultType="com.school.forum.forum.entity.Post">
+        SELECT
+        <include refid="listColumns"/>
+        FROM t_post
+        WHERE status = 1
+        AND type &lt;&gt; 0
+        <if test="boardId != null">
+            AND board_id = #{boardId}
+        </if>
+        ORDER BY type DESC, publish_time DESC
+    </select>
+
+    <!--
+      CASE WHEN 批量更新：同一批里几百个帖子的点赞增量合并成一条 SQL。
+      CAST(... AS SIGNED) 是必需的：like_count 是无符号列，无符号 + 负数会直接报
+      "value is out of range" 而中断整条语句，GREATEST 拦不住已经发生的溢出。
+    -->
+    <update id="batchAddLikeCount">
+        UPDATE t_post
+        SET like_count = GREATEST(0, CAST(like_count AS SIGNED) + CASE id
+        <foreach collection="deltas" item="d">
+            WHEN #{d.targetId} THEN #{d.delta}
+        </foreach>
+        ELSE 0 END)
+        WHERE id IN
+        <foreach collection="deltas" item="d" open="(" separator="," close=")">
+            #{d.targetId}
+        </foreach>
+    </update>
+
+    <update id="batchAddViewCount">
+        UPDATE t_post
+        SET view_count = GREATEST(0, CAST(view_count AS SIGNED) + CASE id
+        <foreach collection="deltas" item="d">
+            WHEN #{d.targetId} THEN #{d.delta}
+        </foreach>
+        ELSE 0 END)
+        WHERE id IN
+        <foreach collection="deltas" item="d" open="(" separator="," close=")">
+            #{d.targetId}
+        </foreach>
+    </update>
+
+    <!--
+      last_comment_time 只在增量大于 0 时更新：删除评论不应把「最后评论时间」往回拨，
+      否则按最新回复排序时，一个删除动作会把帖子重新顶到前面。
+    -->
+    <update id="addCommentCount">
+        UPDATE t_post
+        SET comment_count = GREATEST(0, CAST(comment_count AS SIGNED) + #{delta}),
+            last_comment_time = CASE
+                WHEN #{delta} &gt; 0 AND #{lastCommentTime} IS NOT NULL THEN #{lastCommentTime}
+                ELSE last_comment_time
+            END
+        WHERE id = #{postId}
+    </update>
+
+</mapper>

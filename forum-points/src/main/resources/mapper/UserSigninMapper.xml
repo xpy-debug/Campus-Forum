@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.school.forum.points.mapper.UserSigninMapper">
+
+    <!--
+      当月已签日期。只取 signin_date 一列，走 uk_user_date 的 (user_id, signin_date) 前缀，
+      无需回表——一个月最多 31 行的结果集也不值得做缓存。
+    -->
+    <select id="selectDatesOfMonth" resultType="java.time.LocalDate">
+        SELECT signin_date
+        FROM t_user_signin
+        WHERE user_id = #{userId}
+          AND `year_month` = #{yearMonth}
+        ORDER BY signin_date
+    </select>
+
+    <!--
+      上月全勤用户。
+
+      【为什么不写成 JOIN t_user_points 一起把「已发放」过滤掉】
+      那样确实能一次查完，但会把「谁该发」和「谁已发」两件事耦合进一条 SQL，
+      而后者是会被并发修改的（任务正在发的时候又跑了第二个实例）。
+      拆开之后，本查询只负责「谁该发」这个纯读取的职责，
+      「是否已发」由业务侧逐用户判断并最终由 uk_user_biz 兜底，语义更清楚。
+
+      【HAVING COUNT(*) > threshold】
+      参数是「超过多少天」，25 的语义就是「26 天及以上」。
+
+      【LIMIT 放在最外层】
+      先分组再截断，分批的粒度是「用户」而不是「签到行」。
+
+      【user_id > lastUserId 游标】
+      分批的边界取上一批的最后一个 user_id，而不是 LIMIT offset, n：
+      后者每批都要重新扫过前面所有分组，而本查询正是要把整月符合条件的人走完。
+      条件加在 WHERE 里（分组之前），因此每个用户的签到行要么全被算进来、
+      要么全被排除，HAVING 的天数不会因分批而被截断。
+    -->
+    <select id="selectFullAttendanceUsers"
+            resultType="com.school.forum.points.support.SigninCount">
+        SELECT user_id AS userId, COUNT(*) AS days
+        FROM t_user_signin
+        WHERE `year_month` = #{yearMonth}
+        <if test="lastUserId != null">
+            AND user_id &gt; #{lastUserId}
+        </if>
+        GROUP BY user_id
+        HAVING COUNT(*) > #{threshold}
+        ORDER BY user_id
+        LIMIT #{limit}
+    </select>
+
+    <select id="countByMonth" resultType="int">
+        SELECT COUNT(*)
+        FROM t_user_signin
+        WHERE user_id = #{userId}
+          AND `year_month` = #{yearMonth}
+    </select>
+
+    <!--
+      位图修复任务的取数：某个日期之后（含）的全部签到记录。
+
+      按 signin_date 的范围走 uk_user_date 的 (user_id, signin_date) 前缀不够用——
+      这里没有 user_id 条件，是跨用户扫描，因此会走 idx_month_user 或直接范围扫描。
+      这个任务每天只跑一次、只看最近两个月，代价可以接受；
+      真要优化，应当按 year_month 加条件改成两次单月查询。
+
+      返回实体而不是投影：修复需要 (user_id, signin_date) 两列来算位图偏移量，
+      而实体正好提供这两列，再定义一个 DTO 属于多余的仪式感。
+    -->
+    <select id="selectSigninSince" resultType="com.school.forum.points.entity.UserSignin">
+        SELECT user_id, signin_date, `year_month`
+        FROM t_user_signin
+        WHERE signin_date &gt;= #{since}
+        ORDER BY user_id, signin_date
+    </select>
+
+</mapper>

@@ -1,0 +1,42 @@
+# ============================================================================
+# MQ 选型：使用 Kafka
+# ============================================================================
+# 启动方式：java -jar school-forum.jar --spring.profiles.active=mq-kafka
+#
+# 这是「同一份业务代码跑两家 MQ」的切换开关。切过去之后：
+#   - 业务模块的代码一行都不变（它们只依赖 EventPublisher / EventHandler）
+#   - 消费埋点自动打上 provider=kafka 标签，与 RabbitMQ 的数据落在同一张表，
+#     可以直接 GROUP BY provider 对比
+# ============================================================================
+
+forum:
+  mq:
+    provider: kafka
+    kafka:
+      # 并发度。注意：Kafka 每个分区最多被消费组内一个线程消费，
+      # 所以这个值超过分区数（默认 3）不会带来任何额外吞吐，只会浪费线程。
+      # 要提升消费能力只能增加分区数，而分区数一旦定了只能加不能减
+      # （减少分区会导致同一 key 的数据分布变化，顺序性被破坏）。
+      # 这个不可逆性正是 Kafka 与 RabbitMQ 在弹性上的重要区别：
+      # RabbitMQ 加消费者是即时的、可逆的。
+      concurrency: 3
+      max-poll-records: 200
+      auto-commit: false
+      group-prefix: forum
+      # 开发期设为 false，让应用在没有 Kafka 时也能启动。
+      # 生产环境应设为 true——Topic 建不出来会让消息被静默丢弃。
+      fatal-if-broker-unavailable: false
+
+spring:
+  autoconfigure:
+    # 排除 RabbitMQ 的自动配置，理由同 mq-rabbit profile
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+  kafka:
+    bootstrap-servers: localhost:9092
+
+logging:
+  level:
+    com.school.forum.infrastructure.mq.kafka: debug
+    # Kafka 客户端在 rebalance 时会打大量 INFO 日志，压测时尤其吵
+    org.apache.kafka.clients.consumer.internals.ConsumerCoordinator: warn
