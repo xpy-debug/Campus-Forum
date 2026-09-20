@@ -20,6 +20,10 @@ dist/
 logs/
 $log
 
+# ===================== 压测夹具（生成物，不入库） =====================
+# benchmark/gen_users.py 用 --count 随时可重新生成，没必要把几 MB 的 SQL 提交上去
+benchmark/generated/
+
 # ===================== 本地运行时产物 / 冒烟测试输出 =====================
 login.json
 .smoke_user
