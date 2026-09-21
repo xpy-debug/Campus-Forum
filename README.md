@@ -18,18 +18,18 @@ school-forum/
 │   ├── 04-数据库设计.md                        数据库设计说明书
 │   └── 05-消息中间件选型对比方案.md              Kafka vs RabbitMQ 性能对比实验方案
 ├── sql/
-│   ├── 01-schema.sql                          建表 DDL（23 张表）
+│   ├── 01-schema.sql                          建表 DDL
 │   └── 02-init-data.sql                       初始化种子数据
 ├── docker/
 │   └── docker-compose.yml                     MySQL / Redis / RabbitMQ / Kafka 及两个 Web UI
-├── pom.xml                                    聚合 POM（单体多模块）
+├── pom.xml                                    聚合 POM
 ├── forum-common/                              通用返回体、异常、常量、工具
 ├── forum-infrastructure/                      Web 配置、认证骨架、MQ 抽象、本地消息表
 ├── forum-user/                                用户与认证：注册、登录、刷新、登出、UserApi
 ├── forum-forum/                               论坛主体：板块、帖子、评论、点赞、浏览数回写
-├── forum-notification/                        通知（未实现）
-├── forum-seckill/                             秒杀（未实现）
-├── forum-admin/                               后台管理（未实现）
+├── forum-notification/                        通知
+├── forum-seckill/                             秒杀
+├── forum-admin/                               后台管理
 ├── forum-boot/                                启动模块 + 配置 + ArchUnit 架构测试
 └── frontend/                                  Vue 3 前端（Vite / Pinia / Router / Element Plus）
 ```
